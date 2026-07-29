@@ -13,5 +13,17 @@ system-design questions from a PDF document.
 - Filters weak matches using a distance threshold
 - Generates grounded answers using an OpenAI model
 
-The current implementation is intentionally kept in one `app.py` file.
-It will be modularised in a later iteration.
+## Structure
+
+The pipeline is split into single-responsibility modules, each mirroring one
+stage above:
+
+- `config.py` — constants (paths, model names, chunk size/overlap, top-k, distance threshold)
+- `loader.py` — PDF loading and text cleaning
+- `splitter.py` — chunking
+- `embedder.py` — local embedding model
+- `vector_store.py` — Chroma storage and dedup
+- `retriever.py` — similarity search and threshold filtering
+- `generator.py` — prompt building and OpenAI answer generation
+- `rag_pipeline.py` — orchestrates the full flow end-to-end
+- `app.py` — thin entry point that calls `rag_pipeline.run()`
