@@ -9,3 +9,4 @@ sentence-transformers
 langchain-chroma
 langchain-openai
 python-dotenv
+streamlit

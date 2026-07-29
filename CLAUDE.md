@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A work-in-progress Retrieval-Augmented Generation (RAG) application that answers system-design
 questions from a single PDF document (`data/System Design Concepts.pdf`). The pipeline — PDF
 loading, cleaning, chunking, embedding, vector storage, retrieval, and answer generation — is
-split into single-responsibility modules (see Architecture below), orchestrated by
-`rag_pipeline.py` and run via the thin entry point `app.py`.
+split into single-responsibility modules (see Architecture below). It has two front ends: a CLI
+orchestrated by `rag_pipeline.py` and run via the thin entry point `app.py`, and a Streamlit UI
+(`streamlit_app.py`) that calls the same underlying pipeline functions directly.
 
 ## Setup and running
 
@@ -28,6 +29,15 @@ python app.py
 
 This builds/updates the Chroma vector store from the PDF, then prompts for a question on stdin
 and prints a grounded answer.
+
+Run the Streamlit UI instead:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+This opens a browser page with a query box and an "Ask" button; the vector store, embedding
+model, and LLM are built once per process (`st.cache_resource`) and reused across questions.
 
 There is no test suite, linter, or build step configured in this repo.
 
@@ -71,3 +81,22 @@ Debug-only helpers not on the main pipeline path: `inspect_documents()` (`loader
 `vector_store/` is a persisted Chroma DB (sqlite + HNSW index files) and is gitignored, along
 with `.env`, `.venv/`, and `data/*.pdf`. Since the PDF itself is gitignored, don't assume it's
 present when reasoning about a fresh checkout.
+
+### Streamlit front end (`streamlit_app.py`)
+
+Imports the same building-block functions the stages above use (`loader.py`, `splitter.py`,
+`embedder.py`, `vector_store.py`, `retriever.py`, `generator.py`) directly, independent of
+`rag_pipeline.run()` — the CLI orchestrator stays the sole caller of `run()`. Two
+`st.cache_resource`-wrapped functions build the vector store (load → clean → split → embed →
+store, combined into one cached call) and the LLM once per process, so repeated "Ask" clicks
+don't reload either. The "Ask" button mirrors `rag_pipeline.run()`'s `if results: ... else: ...`
+branch: the LLM is only constructed/called when `retrieve_relevant_chunks()` returns non-empty
+results; otherwise the UI shows the same no-match string the CLI prints
+(`"I could not find relevant information in the provided document."`, distinct from the
+context-insufficient string baked into `generator.py`'s system prompt). The sidebar's PDF
+uploader is `disabled=True` — visual only, not wired to the pipeline; swapping the indexed source
+is a future feature. The module also silences the `streamlit.watcher.local_sources_watcher`
+logger: Streamlit's file watcher introspects every imported module's `__path__`, and
+`transformers` (via `langchain-huggingface`) lazily imports optional vision submodules that need
+`torchvision` (not installed, not needed) — the resulting `ModuleNotFoundError` is harmless but
+noisy, so it's suppressed rather than adding an unused dependency.
