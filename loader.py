@@ -1,6 +1,8 @@
 import re
 
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders.blob_loaders import Blob
+from langchain_community.document_loaders.parsers.pdf import PyPDFParser
 from langchain_core.documents import Document
 
 from config import PDF_PATH
@@ -18,6 +20,15 @@ def load_pdf():
     documents = loader.load()
 
     return documents
+
+
+def load_pdf_from_bytes(data: bytes, filename: str) -> list[Document]:
+    """Load an in-memory PDF (e.g. a Streamlit upload) into page Documents."""
+
+    blob = Blob.from_data(data, path=filename)
+    parser = PyPDFParser()
+
+    return list(parser.lazy_parse(blob))
 
 def is_list_item(line: str) -> bool:
     """Check whether a line begins with a bullet or number."""

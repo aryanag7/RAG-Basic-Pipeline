@@ -17,6 +17,17 @@ def retrieve_relevant_chunks(
         k=top_k,
     )
 
+    print(f"\nRetrieval candidates for query: {query!r} (max_distance={max_distance})")
+    for rank, (document, distance) in enumerate(results, start=1):
+        verdict = "PASS" if distance <= max_distance else "DROP"
+        page = document.metadata.get("page_label", "Unknown")
+        source = document.metadata.get("source", "Unknown")
+        preview = document.page_content[:80].replace("\n", " ")
+        print(
+            f"  [{verdict}] #{rank} distance={distance:.4f} "
+            f"page={page} source={source} | {preview!r}"
+        )
+
     relevant_results = [
         (document, distance)
         for document, distance in results

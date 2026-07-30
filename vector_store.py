@@ -19,22 +19,8 @@ def create_chunk_id(chunk: Document) -> str:
 
     return sha256(identity.encode("utf-8")).hexdigest()
 
-def create_or_load_vector_store(
-    chunks: list[Document],
-    embedding_model: HuggingFaceEmbeddings,
-) -> Chroma:
-    """Create Chroma and add only chunks not already stored."""
-
-    vector_store = Chroma(
-        collection_name=COLLECTION_NAME,
-        embedding_function=embedding_model,
-        persist_directory=str(VECTOR_STORE_PATH),
-        collection_configuration={
-            "hnsw": {
-                "space": "cosine",
-            }
-        },
-    )
+def add_new_chunks(chunks: list[Document], vector_store: Chroma) -> int:
+    """Add only chunks not already stored (by deterministic sha256 ID). Returns count added."""
 
     chunk_ids = [create_chunk_id(chunk) for chunk in chunks]
 
@@ -55,7 +41,30 @@ def create_or_load_vector_store(
             ids=new_ids,
         )
 
-        print(f"Added {len(new_chunks)} chunks to Chroma.")
+    return len(new_chunks)
+
+
+def create_or_load_vector_store(
+    chunks: list[Document],
+    embedding_model: HuggingFaceEmbeddings,
+) -> Chroma:
+    """Create Chroma and add only chunks not already stored."""
+
+    vector_store = Chroma(
+        collection_name=COLLECTION_NAME,
+        embedding_function=embedding_model,
+        persist_directory=str(VECTOR_STORE_PATH),
+        collection_configuration={
+            "hnsw": {
+                "space": "cosine",
+            }
+        },
+    )
+
+    added = add_new_chunks(chunks, vector_store)
+
+    if added:
+        print(f"Added {added} chunks to Chroma.")
     else:
         print("All chunks are already stored in Chroma.")
 
