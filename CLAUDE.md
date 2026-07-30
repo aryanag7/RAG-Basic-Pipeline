@@ -139,16 +139,57 @@ Imports the same building-block functions the stages above use (`loader.py`, `sp
 `rag_pipeline.run()` — the CLI orchestrator stays the sole caller of `run()`. Two
 `st.cache_resource`-wrapped functions build the vector store (load → clean → split → embed →
 store, combined into one cached call) and the LLM once per process, so repeated "Ask" clicks
-don't reload either. The "Ask" button mirrors `rag_pipeline.run()`'s `if results: ... else: ...`
-branch: the LLM is only constructed/called when `retrieve_relevant_chunks()` returns non-empty
-results; otherwise the UI shows the same no-match string the CLI prints
-(`"I could not find relevant information in the provided document."`, distinct from the
-context-insufficient string baked into `generator.py`'s system prompt). The module also silences
-the `streamlit.watcher.local_sources_watcher` logger: Streamlit's file watcher introspects every
-imported module's `__path__`, and `transformers` (via `langchain-huggingface`) lazily imports
-optional vision submodules that need `torchvision` (not installed, not needed) — the resulting
-`ModuleNotFoundError` is harmless but noisy, so it's suppressed rather than adding an unused
-dependency.
+don't reload either. `load_vector_store()` and `st.session_state["processed_uploads"]` are
+resolved once near the top of the script, before the sidebar renders — not lazily inside the
+sidebar/Ask blocks as originally written — because the stat cards and documents table (below)
+need real numbers on first page view; this means the vector store now builds eagerly on first
+load instead of on first upload/ask, which is cheap given `st.cache_resource`. The "Ask" button
+mirrors `rag_pipeline.run()`'s `if results: ... else: ...` branch: the LLM is only
+constructed/called when `retrieve_relevant_chunks()` returns non-empty results; otherwise the UI
+shows the same no-match string the CLI prints (`"I could not find relevant information in the
+provided document."`, distinct from the context-insufficient string baked into `generator.py`'s
+system prompt). The module also silences the `streamlit.watcher.local_sources_watcher` logger:
+Streamlit's file watcher introspects every imported module's `__path__`, and `transformers` (via
+`langchain-huggingface`) lazily imports optional vision submodules that need `torchvision` (not
+installed, not needed) — the resulting `ModuleNotFoundError` is harmless but noisy, so it's
+suppressed rather than adding an unused dependency.
+
+**Theme (`.streamlit/config.toml`, `ui_theme.py`)** — a "warm editorial" palette (cream
+background, ink-navy text, terracotta primary/teal secondary accents, `Fraunces`/`Karla` Google
+Fonts) is set entirely through Streamlit 1.60's native `[theme]`/`[theme.sidebar]` config tokens —
+deliberately not raw CSS-selector overrides, since Streamlit's internal DOM class names aren't a
+stable target across versions. `st.info`/`warning`/`error`/`success` and the documents table's
+`:green-badge[...]`-style markdown badges automatically pick up the theme's semantic colors
+(`greenColor`/`redColor`/`orangeColor`/`blueColor`/`grayColor`) with no extra code.
+`ui_theme.py` covers only what `config.toml` can't express: `CUSTOM_CSS` (injected once via
+`st.html()`) holds the pipeline-animation keyframes plus one `key=`-scoped rule for the answer
+card's accent border (the `.st-key-<key>` class Streamlit generates for any widget/container given
+a `key=`); `render_pipeline_frame(stage)` renders one frame of a 4-node HTML diagram (Question →
+Search+fuse → Generate answer → Answer); `format_file_size()`/`status_badge()` are small table
+formatting helpers. No new pip dependency — zero new packages beyond what's already listed in
+`requirements.txt`, consistent with this project's preference for built-in-first (see the BM25
+stopword list above, hardcoded rather than pulling in NLTK).
+
+**Loading-state pipeline animation** — replaces the previous plain `st.spinner("Thinking...")`.
+A single `st.empty()` placeholder is updated with a different animated frame immediately before
+each real per-query call: `render_pipeline_frame("retrieve")` before `retrieve_relevant_chunks()`,
+then `render_pipeline_frame("generate")` before `generate_answer()` (only reached when `results`
+is non-empty — matching the "no LLM call on zero relevant chunks" rule, so the diagram never
+implies a generation step that didn't happen), then `render_pipeline_frame("complete")` held for
+`time.sleep(0.4)` before the placeholder clears. There is no JavaScript and no client-side timer —
+"real progress" comes entirely from which frame the Python code renders and when, synchronized to
+the two actual pipeline calls.
+
+**Stat cards + documents table** — three `st.columns` cards (`st.metric` for documents-indexed and
+chunks-in-index counts, a `st.badge` callout for "Hybrid search" surfacing the BM25+RRF upgrade
+from the Retrieve stage above) sit above an `st.table` listing every indexed document: the bundled
+PDF plus each entry in `st.session_state["processed_uploads"]`, with a size and a status badge.
+`st.table` was chosen over `st.dataframe` specifically because `st.table` renders
+`:color-badge[...]` markdown shortcodes inline in the cell, while `st.dataframe`'s markdown column
+only renders them inside a click-to-open cell overlay. This required one small addition to the
+existing upload-processing dict: `"size": len(data)` is now stored alongside `name`/`status` at
+both dict-construction sites in the sidebar's upload loop, purely so the table has something to
+display.
 
 **PDF upload (sidebar)** — `st.file_uploader(..., accept_multiple_files=True)` lets the user add
 PDFs beyond the fixed one; uploaded content is merged into the *same* Chroma collection, so

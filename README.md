@@ -70,11 +70,20 @@ Opens a browser page with a query box and an "Ask" button. The embedding model, 
 and LLM are loaded once per process and reused across questions, so only the first question pays
 the index-build cost.
 
+The main page shows two stat cards (documents indexed, chunks in the index) plus a table of every
+indexed document — the bundled PDF and any uploads, each with a size and a status badge — so you
+can see exactly what's in the knowledge base at a glance.
+
 The sidebar lets you upload additional PDFs — each one is loaded, cleaned, chunked, embedded, and
 added to the same knowledge base as the bundled PDF, so answers can draw on both. Uploading a PDF
 that's already indexed (by content, not filename) is a no-op — it's detected and skipped rather
 than duplicated. Per-file status (chunks added, already indexed, no extractable text, or a parse
-error) shows in the sidebar as each upload is processed.
+error) shows in the sidebar as each upload is processed, and in the documents table above.
+
+Asking a question replaces the loading spinner with a small animated diagram (Question → Search +
+fuse → Generate answer → Answer) that advances in step with what's actually happening — the
+"Search + fuse" node lights up while the hybrid retriever runs, and "Generate answer" only lights
+up once the LLM call actually starts.
 
 ## Notes
 
