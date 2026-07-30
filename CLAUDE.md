@@ -67,29 +67,66 @@ There is no test suite, linter, or build step configured in this repo.
    instead of duplicating the store. `add_new_chunks()` is factored out separately so callers that
    already hold an open `Chroma` instance (the Streamlit uploader) can add to it directly, without
    constructing a second client.
-5. **Retrieve** (`retriever.py`) — `retrieve_relevant_chunks()` does a similarity search
-   (`TOP_K`) and drops any result with distance above `MAX_DISTANCE` (currently `0.75` — raised
-   from the original `0.65` because resume/bullet-style uploaded PDFs score higher cosine distance
-   than the system-design PDF's prose against this embedding model). If nothing survives the
-   threshold, the OpenAI API is never called (see the `else` branch in `rag_pipeline.run()`).
-   Every call unconditionally prints each candidate's rank, distance, PASS/DROP verdict, page,
-   source, and a content preview to the console — this is permanent, always-on debug logging (not
-   gated behind a flag), the main way to diagnose why a query got zero/weak matches.
+5. **Retrieve** (`retriever.py`) — `retrieve_relevant_chunks()` is a hybrid search: an embedding
+   channel (Chroma `similarity_search_with_score`, widened to `EMBED_CANDIDATE_K` candidates) and
+   a keyword channel (BM25, widened to `BM25_TOP_K` candidates) are fused into one ranked list via
+   Reciprocal Rank Fusion (`fusion.py`, constant `RRF_K`), then filtered and truncated to `TOP_K`.
+   - `bm25_index.py`'s `build_bm25_index()` rebuilds a `rank_bm25.BM25Okapi` index **from scratch
+     on every call**, reading whatever's currently in the vector store via `vector_store.get()` —
+     it is not cached and not built from the `chunks` list computed earlier in the pipeline. This
+     is deliberate: the Streamlit uploader (see below) adds chunks to the already-cached
+     `vector_store` object at arbitrary times after `load_vector_store()` was cached, so rebuilding
+     BM25 fresh from live vector-store contents on every query keeps it automatically in sync with
+     uploads, with no cache-invalidation logic needed. The corpus is small (a few hundred chunks),
+     so rebuilding per query is cheap. `_tokenize()` lowercases and regex-splits on `\w+`, then
+     drops a hardcoded list of common English stopwords written to match tokens *after* that split
+     (e.g. `"don't"` becomes `"don"`/`"t"`, so both fragments are listed, not the whole
+     contraction) — without this, a query like "how do I bake a croissant" gets a spurious
+     positive BM25 score from stopword overlap with unrelated chunks, which would otherwise let it
+     survive the gating step below. `search_bm25()` drops any chunk scoring `<= 0` (no real term
+     overlap).
+   - The embedding side needs a join key to match against BM25's native chunk ids (which
+     `vector_store.get()` returns for free); `similarity_search_with_score()` doesn't return ids,
+     so `retrieve_relevant_chunks()` recomputes them by calling the existing `create_chunk_id()`
+     from `vector_store.py` on each hit, reusing the same deterministic sha256 logic rather than
+     adding a second ID scheme.
+   - `fusion.py`'s `reciprocal_rank_fusion()` sums `1 / (RRF_K + rank)` per chunk id across
+     whichever list(s) it appears in (1-based rank), returning the full fused list sorted by RRF
+     score — un-truncated and un-gated; `retriever.py` applies gating/truncation afterward.
+   - Gating (`retriever.py`'s `_passes()`): a candidate passes if **either** channel independently
+     qualifies it — embedding distance `<= MAX_DISTANCE`, or a positive BM25 score — regardless of
+     whether it also appears in the other channel. This is deliberately OR, not "embedding-pool
+     presence vetoes the BM25 pass": an earlier version required embedding distance to pass
+     whenever a chunk was present in the embedding pool at all, which caused a real miss in
+     testing — a chunk with an overwhelming, unique-term BM25 match (rank 1, score roughly double
+     any other seen in testing) got dropped because it also weakly showed up in the embedding pool
+     just over `MAX_DISTANCE`. OR logic is a strict superset of what passed before and fixes that
+     case without weakening anything else.
+   - If nothing survives gating, the OpenAI API is never called (see the `else` branch in
+     `rag_pipeline.run()`) — unchanged from before hybrid search.
+   - Every call unconditionally prints each fused candidate's rank, RRF score, per-channel
+     distance/score and rank (when present), PASS/DROP verdict, page, source, and a content
+     preview to the console — this is permanent, always-on debug logging (not gated behind a
+     flag), the main way to diagnose why a query got zero/weak matches or which channel(s)
+     contributed a given hit.
 6. **Generate** (`generator.py`) — `create_llm()` / `generate_answer()` sends the filtered chunks
    plus the question to `ChatOpenAI` (`OPENAI_MODEL_NAME`). The system prompt constrains the
    model to answer only from the provided context and to say so explicitly when the context is
    insufficient.
 
 All tunables live as constants in `config.py`: `PDF_PATH`, `EMBEDDING_MODEL_NAME`,
-`VECTOR_STORE_PATH`, `COLLECTION_NAME`, `TOP_K`, `MAX_DISTANCE`, `OPENAI_MODEL_NAME`,
-`CHUNK_SIZE`, `CHUNK_OVERLAP`. `config.py` also calls `load_dotenv()`, so it must be imported
-before anything that reads env vars — every other module already imports from it, which
-preserves that ordering.
+`VECTOR_STORE_PATH`, `COLLECTION_NAME`, `TOP_K`, `MAX_DISTANCE`, `EMBED_CANDIDATE_K`,
+`BM25_TOP_K`, `RRF_K`, `OPENAI_MODEL_NAME`, `CHUNK_SIZE`, `CHUNK_OVERLAP`. `EMBED_CANDIDATE_K`
+and `BM25_TOP_K` (both `20`, 4x `TOP_K`) widen each channel's candidate pool before fusion, so RRF
+has enough material to re-rank across channels; `RRF_K` (`60`) is the standard Reciprocal Rank
+Fusion constant from Cormack/Clarke/Buettcher 2009. `config.py` also calls `load_dotenv()`, so it
+must be imported before anything that reads env vars — every other module already imports from
+it, which preserves that ordering.
 
 Debug-only helpers not on the main pipeline path: `inspect_documents()` (`loader.py`),
 `inspect_one_embedding()` (`embedder.py`), `display_retrieved_chunks()` (`retriever.py` — a
-fuller, post-filter-only dump; distinct from `retrieve_relevant_chunks()`'s own always-on
-candidate logging described above).
+fuller, post-filter-only dump printing each result's fused RRF score, not a raw distance; distinct
+from `retrieve_relevant_chunks()`'s own always-on candidate logging described above).
 
 `vector_store/` is a persisted Chroma DB (sqlite + HNSW index files) and is gitignored, along
 with `.env`, `.venv/`, and `data/*.pdf`. Since the PDF itself is gitignored, don't assume it's

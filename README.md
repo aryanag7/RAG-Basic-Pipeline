@@ -11,12 +11,15 @@ from the content of the document(s), with page references.
 - Splits text into overlapping chunks
 - Creates local Hugging Face embeddings
 - Stores embeddings persistently in Chroma
-- Retrieves the top five relevant chunks
-- Filters weak matches using a distance threshold
+- Retrieves candidates via **hybrid search**: embedding similarity (Chroma) and keyword search
+  (BM25), combined with Reciprocal Rank Fusion (RRF)
+- Filters weak matches — a chunk survives if either channel independently qualifies it (embedding
+  distance under the threshold, or a positive BM25 keyword-overlap score)
+- Keeps the top five fused results
 - Generates grounded answers using an OpenAI model
 
-If no chunk clears the distance threshold, the OpenAI API is never called — the app says it
-couldn't find relevant information instead of guessing.
+If no chunk clears that bar, the OpenAI API is never called — the app says it couldn't find
+relevant information instead of guessing.
 
 ## Structure
 
@@ -27,7 +30,9 @@ The pipeline is split into single-responsibility modules, each mirroring one sta
 - `splitter.py` — chunking
 - `embedder.py` — local embedding model
 - `vector_store.py` — Chroma storage and dedup
-- `retriever.py` — similarity search and threshold filtering
+- `bm25_index.py` — BM25 keyword index, rebuilt from the live vector store on every query
+- `fusion.py` — Reciprocal Rank Fusion of the embedding and BM25 result lists
+- `retriever.py` — runs both retrieval channels, fuses them, and applies threshold filtering
 - `generator.py` — prompt building and OpenAI answer generation
 - `rag_pipeline.py` — orchestrates the full flow end-to-end
 - `app.py` — thin CLI entry point that calls `rag_pipeline.run()`
@@ -74,6 +79,7 @@ error) shows in the sidebar as each upload is processed.
 ## Notes
 
 - There is no test suite, linter, or build step configured in this repo.
-- Every retrieval logs each candidate chunk's distance and pass/drop verdict against the
-  threshold to the console (CLI terminal or the Streamlit server's terminal) — useful for
-  debugging why a question returned no answer.
+- Every retrieval logs each fused candidate's rank, RRF score, per-channel distance/score, and
+  pass/drop verdict to the console (CLI terminal or the Streamlit server's terminal) — useful for
+  debugging why a question returned no answer or which channel (embedding, BM25, or both)
+  surfaced a given chunk.
