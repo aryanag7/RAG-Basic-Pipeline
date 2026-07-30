@@ -1,8 +1,9 @@
 # System Design RAG
 
 A work-in-progress Retrieval-Augmented Generation (RAG) application that answers system-design
-questions grounded in a single PDF document. Ask a question through a CLI or a Streamlit web UI
-and get an answer generated only from the content of the document, with page references.
+questions grounded in a fixed PDF document — and, through the Streamlit UI, any additional PDFs
+you upload. Ask a question through a CLI or a Streamlit web UI and get an answer generated only
+from the content of the document(s), with page references.
 
 ## How it works
 
@@ -64,10 +65,15 @@ Opens a browser page with a query box and an "Ask" button. The embedding model, 
 and LLM are loaded once per process and reused across questions, so only the first question pays
 the index-build cost.
 
-The sidebar shows a PDF uploader for indexing a different document — it's currently
-display-only (uploading is a planned future feature); the app always answers from the bundled
-PDF for now.
+The sidebar lets you upload additional PDFs — each one is loaded, cleaned, chunked, embedded, and
+added to the same knowledge base as the bundled PDF, so answers can draw on both. Uploading a PDF
+that's already indexed (by content, not filename) is a no-op — it's detected and skipped rather
+than duplicated. Per-file status (chunks added, already indexed, no extractable text, or a parse
+error) shows in the sidebar as each upload is processed.
 
 ## Notes
 
-There is no test suite, linter, or build step configured in this repo.
+- There is no test suite, linter, or build step configured in this repo.
+- Every retrieval logs each candidate chunk's distance and pass/drop verdict against the
+  threshold to the console (CLI terminal or the Streamlit server's terminal) — useful for
+  debugging why a question returned no answer.
