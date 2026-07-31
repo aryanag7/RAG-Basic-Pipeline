@@ -75,6 +75,25 @@ fuse → Generate answer → Answer) that advances in step with what's actually 
 "Search + fuse" node lights up while the hybrid retriever runs, and "Generate answer" only lights
 up once the LLM call actually starts.
 
+## Screenshots
+
+<!--
+  Drop image files into docs/screenshots/ using the filenames below and they'll
+  render here automatically — no markup changes needed.
+-->
+
+**Home — indexed documents, chunk counts, and stat cards**
+
+![Home page showing indexed documents and chunk counts](docs/screenshots/home.png)
+
+**Asking a question — the retrieval/generation pipeline animation**
+
+![Pipeline animation while a question is being answered](docs/screenshots/pipeline.png)
+
+**The generated answer**
+
+![Answer generated from retrieved chunks](docs/screenshots/response.png)
+
 ## Notes
 
 - There is no test suite, linter, or build step configured in this repo.

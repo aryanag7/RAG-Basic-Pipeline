@@ -249,3 +249,22 @@ parse failures like encrypted or corrupted PDFs) are all recorded in that same s
 *including* errors, so a deterministically-failing file doesn't get re-parsed and re-fail on every
 subsequent rerun; these render as sidebar banners (`st.success`/`info`/`warning`/`error`) only,
 separate from the persistent documents table above.
+
+The upload loop tracks a `newly_processed` flag across the `for uploaded_file in uploaded_files`
+loop and, if any file wasn't already in `processed` (i.e. genuinely new work happened this pass),
+calls `st.rerun()` once after the loop — the same pattern the delete button already used. This
+matters because `documents`/`doc_count`/`total_chunks` (and the stat cards/table built from them)
+are computed near the top of the script, *before* this sidebar block runs; without the explicit
+rerun, a single script pass would add the chunks to Chroma but still render the stat cards/table
+from the pre-upload snapshot taken earlier in that same pass, so the counts looked stale until
+something else (like a manual browser reload) triggered a fresh run. The rerun is safe from
+looping: on the next pass the same files are still in the uploader's returned list, but their
+content hashes are now already in `processed`, so the loop's `if content_hash in processed:
+continue` skips them without re-triggering another rerun. Multiple files uploaded together still
+only cause one rerun, since the flag is checked once after the whole loop, not per file.
+
+Besides the app's own gitignored paths above, the repo also ignores two directories unrelated to
+the pipeline itself: `extract_pdfs_rag/` (a local RAG benchmark dataset/notebook — CSVs, zipped PDF
+corpora, an eval notebook — used for external evaluation work, not read by the app) and `.claude/`
+(machine-local Claude Code settings, e.g. permission grants tied to one developer's file paths, not
+project configuration).
