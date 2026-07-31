@@ -17,13 +17,6 @@ _STAGE_STATES: dict[Stage, dict[str, str]] = {
 
 _FLOWING_CONNECTOR: dict[Stage, int] = {"retrieve": 0, "generate": 1, "complete": 2}
 
-_STATUS_BADGES = {
-    "added": ":green-badge[Indexed]",
-    "duplicate": ":gray-badge[Already indexed]",
-    "empty": ":orange-badge[No text found]",
-    "error": ":red-badge[Failed]",
-}
-
 
 def format_file_size(num_bytes: int) -> str:
     """Format a byte count as a human-readable size, e.g. 1536000 -> '1.5 MB'."""
@@ -34,12 +27,6 @@ def format_file_size(num_bytes: int) -> str:
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
     return f"{size:.1f} GB"
-
-
-def status_badge(status: str) -> str:
-    """Map a processed_uploads status to a colored markdown badge shortcode."""
-
-    return _STATUS_BADGES.get(status, ":gray-badge[Unknown]")
 
 
 def render_pipeline_frame(stage: Stage) -> str:
@@ -166,6 +153,13 @@ CUSTOM_CSS = """
 .st-key-answer_card {
     border-left: 4px solid #E4572E !important;
     background: #FBF7F0;
+}
+
+.st-key-app_header {
+    text-align: center;
+}
+.st-key-app_header [data-testid="stHeaderActionElements"] {
+    display: none;
 }
 </style>
 """

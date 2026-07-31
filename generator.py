@@ -43,7 +43,7 @@ def generate_answer(
         (
             "system",
             """
-            You are a helpful system-design tutor.
+            You are a helpful research assistant.
 
             Answer the user's question using only the provided document context.
 

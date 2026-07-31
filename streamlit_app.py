@@ -7,13 +7,17 @@ from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 
 import ui_theme
-from config import PDF_PATH
 from embedder import create_embedding_model
 from generator import create_llm, generate_answer
-from loader import clean_documents, load_pdf, load_pdf_from_bytes
+from loader import clean_documents, load_pdf_from_bytes
 from retriever import retrieve_relevant_chunks
 from splitter import split_documents
-from vector_store import add_new_chunks, create_or_load_vector_store
+from vector_store import (
+    add_new_chunks,
+    create_or_load_vector_store,
+    delete_source,
+    list_indexed_documents,
+)
 
 # Streamlit's file watcher walks every imported module's __path__ to find local
 # files to auto-reload on save. transformers (pulled in via langchain-huggingface)
@@ -23,19 +27,13 @@ from vector_store import add_new_chunks, create_or_load_vector_store
 logging.getLogger("streamlit.watcher.local_sources_watcher").setLevel(logging.ERROR)
 
 
-@st.cache_resource(show_spinner="Loading document and building index...")
+@st.cache_resource(show_spinner="Connecting to the document index...")
 def load_vector_store() -> Chroma:
-    """Build/load the vector store once per app process."""
+    """Open the persistent vector store once per app process."""
 
-    documents = load_pdf()
-    cleaned = clean_documents(documents)
-    chunks = split_documents(cleaned)
     embedding_model = create_embedding_model()
 
-    return create_or_load_vector_store(
-        chunks=chunks,
-        embedding_model=embedding_model,
-    )
+    return create_or_load_vector_store(embedding_model=embedding_model)
 
 
 @st.cache_resource(show_spinner=False)
@@ -45,16 +43,21 @@ def load_llm() -> ChatOpenAI:
     return create_llm()
 
 
-st.set_page_config(page_title="System Design RAG")
+st.set_page_config(page_title="SourceLens")
 st.html(ui_theme.CUSTOM_CSS)
-st.title("System Design RAG")
-st.caption("Ask questions about the system-design PDF and get grounded answers.")
+with st.container(key="app_header"):
+    st.title("SourceLens")
+    st.caption(
+        "Upload PDFs, search across your document library, and get clear answers "
+        "grounded in the original sources."
+    )
 
 vector_store = load_vector_store()
 processed = st.session_state.setdefault("processed_uploads", {})
 
-doc_count = 1 + sum(1 for info in processed.values() if info["status"] in ("added", "duplicate"))
-total_chunks = len(vector_store.get()["ids"])
+documents = list_indexed_documents(vector_store)
+doc_count = len(documents)
+total_chunks = sum(document["chunk_count"] for document in documents)
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -67,28 +70,33 @@ with col3:
         st.caption("BM25 keyword + embedding similarity, fused with RRF")
 
 st.markdown("#### Indexed documents")
-document_rows = [
-    {
-        "Document": PDF_PATH.name,
-        "Type": "Bundled",
-        "Size": ui_theme.format_file_size(PDF_PATH.stat().st_size),
-        "Status": ":green-badge[Indexed]",
-    }
-]
-for info in processed.values():
-    document_rows.append(
-        {
-            "Document": info["name"],
-            "Type": "Uploaded",
-            "Size": ui_theme.format_file_size(info.get("size", 0)),
-            "Status": ui_theme.status_badge(info["status"]),
-        }
-    )
-st.table(document_rows)
+if not documents:
+    st.caption("No documents indexed yet. Upload a PDF to get started.")
+else:
+    header_cols = st.columns([4, 2, 2, 1])
+    for col, label in zip(header_cols, ["Document", "Size", "Chunks", ""]):
+        col.markdown(f"**{label}**")
+
+    for document in documents:
+        row_cols = st.columns([4, 2, 2, 1])
+        row_cols[0].write(document["filename"])
+        row_cols[1].write(ui_theme.format_file_size(document["size"]))
+        row_cols[2].write(str(document["chunk_count"]))
+        if row_cols[3].button(
+            "🗑️",
+            key=f"delete_{document['source']}",
+            help=f"Delete {document['filename']}",
+        ):
+            delete_source(document["source"], vector_store)
+            processed.pop(document["source"].removeprefix("upload:"), None)
+            st.rerun()
 
 with st.sidebar:
     st.markdown("### Document source")
-    st.caption("Currently indexed: `data/System Design Concepts.pdf` (fixed)")
+    if doc_count == 0:
+        st.caption("Upload a PDF to get started.")
+    else:
+        st.caption(f"{doc_count} document(s) indexed.")
 
     uploaded_files = st.file_uploader(
         "Upload additional PDFs",
@@ -98,6 +106,8 @@ with st.sidebar:
     )
 
     if uploaded_files:
+        newly_processed = False
+
         for uploaded_file in uploaded_files:
             data = uploaded_file.getvalue()
             content_hash = sha256(data).hexdigest()
@@ -105,9 +115,14 @@ with st.sidebar:
             if content_hash in processed:
                 continue
 
+            newly_processed = True
+
             with st.spinner(f"Processing {uploaded_file.name}..."):
                 try:
                     docs = load_pdf_from_bytes(data, filename=f"upload:{content_hash}")
+                    for doc in docs:
+                        doc.metadata["filename"] = uploaded_file.name
+                        doc.metadata["file_size"] = len(data)
                     cleaned = clean_documents(docs)
                     chunks = split_documents(cleaned)
                     added = add_new_chunks(chunks, vector_store=vector_store) if chunks else 0
@@ -127,6 +142,9 @@ with st.sidebar:
                         "size": len(data),
                     }
 
+        if newly_processed:
+            st.rerun()
+
     for info in processed.values():
         if info["status"] == "added":
             st.success(f"{info['name']}: {info['added']} chunks added.")
@@ -138,10 +156,12 @@ with st.sidebar:
             st.error(f"{info['name']}: {info['detail']}")
 
 query = st.text_input(
-    "Ask a system-design question",
-    placeholder="e.g. What is a load balancer?",
+    "Ask a question about your documents",
+    placeholder="e.g. What does the document say about load balancing?",
 )
-ask_clicked = st.button("Ask", type="primary")
+ask_clicked = st.button("Ask", type="primary", disabled=(doc_count == 0))
+if doc_count == 0:
+    st.caption("Upload a PDF to get started.")
 
 if ask_clicked:
     if not query.strip():

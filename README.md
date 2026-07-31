@@ -1,16 +1,16 @@
-# System Design RAG
+# SourceLens
 
-A work-in-progress Retrieval-Augmented Generation (RAG) application that answers system-design
-questions grounded in a fixed PDF document — and, through the Streamlit UI, any additional PDFs
-you upload. Ask a question through a CLI or a Streamlit web UI and get an answer generated only
+A Retrieval-Augmented Generation (RAG) application that answers questions grounded in PDFs you
+upload. Upload PDFs, search across your document library, and get clear answers generated only
 from the content of the document(s), with page references.
 
 ## How it works
 
-- Loads and cleans a PDF
+- Loads and cleans each uploaded PDF
 - Splits text into overlapping chunks
 - Creates local Hugging Face embeddings
-- Stores embeddings persistently in Chroma
+- Stores embeddings persistently in Chroma — documents stay indexed across app restarts until you
+  delete them
 - Retrieves candidates via **hybrid search**: embedding similarity (Chroma) and keyword search
   (BM25), combined with Reciprocal Rank Fusion (RRF)
 - Filters weak matches — a chunk survives if either channel independently qualifies it (embedding
@@ -29,14 +29,13 @@ The pipeline is split into single-responsibility modules, each mirroring one sta
 - `loader.py` — PDF loading and text cleaning
 - `splitter.py` — chunking
 - `embedder.py` — local embedding model
-- `vector_store.py` — Chroma storage and dedup
+- `vector_store.py` — Chroma storage, dedup, per-document listing, and deletion
 - `bm25_index.py` — BM25 keyword index, rebuilt from the live vector store on every query
 - `fusion.py` — Reciprocal Rank Fusion of the embedding and BM25 result lists
 - `retriever.py` — runs both retrieval channels, fuses them, and applies threshold filtering
 - `generator.py` — prompt building and OpenAI answer generation
-- `rag_pipeline.py` — orchestrates the full flow end-to-end
-- `app.py` — thin CLI entry point that calls `rag_pipeline.run()`
-- `streamlit_app.py` — Streamlit web UI, calling the same pipeline modules directly
+- `streamlit_app.py` — the Streamlit web UI, calling the pipeline modules directly
+- `ui_theme.py` — warm editorial theme CSS and the loading-state pipeline animation
 
 ## Setup
 
@@ -46,39 +45,30 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Add an `OPENAI_API_KEY` to a `.env` file at the repo root, and place the source PDF at
-`data/System Design Concepts.pdf`.
+Add an `OPENAI_API_KEY` to a `.env` file at the repo root.
 
 ## Usage
-
-### CLI
-
-```bash
-python app.py
-```
-
-Builds/updates the Chroma vector store from the PDF, then prompts for a question on stdin and
-prints a grounded answer.
-
-### Streamlit web UI
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-Opens a browser page with a query box and an "Ask" button. The embedding model, vector store,
-and LLM are loaded once per process and reused across questions, so only the first question pays
-the index-build cost.
+Opens a browser page titled "SourceLens" with a query box and an "Ask" button. The embedding
+model, vector store, and LLM are loaded once per process and reused across questions.
+
+The knowledge base starts empty — there's no bundled document. Upload a PDF from the sidebar to
+get started; the "Ask" button and the query box stay disabled (with a prompt to upload a PDF)
+until at least one document is indexed.
 
 The main page shows two stat cards (documents indexed, chunks in the index) plus a table of every
-indexed document — the bundled PDF and any uploads, each with a size and a status badge — so you
-can see exactly what's in the knowledge base at a glance.
+indexed document with its size, chunk count, and a Delete button — clicking Delete removes that
+document's chunks from the Chroma database entirely, immediately updating the stat cards.
 
-The sidebar lets you upload additional PDFs — each one is loaded, cleaned, chunked, embedded, and
-added to the same knowledge base as the bundled PDF, so answers can draw on both. Uploading a PDF
-that's already indexed (by content, not filename) is a no-op — it's detected and skipped rather
-than duplicated. Per-file status (chunks added, already indexed, no extractable text, or a parse
-error) shows in the sidebar as each upload is processed, and in the documents table above.
+The sidebar lets you upload PDFs — each one is loaded, cleaned, chunked, embedded, and added to
+the Chroma vector store, which persists on disk across app restarts and new browser sessions.
+Uploading a PDF that's already indexed (by content, not filename) is a no-op — it's detected and
+skipped rather than duplicated. Per-file status (chunks added, already indexed, no extractable
+text, or a parse error) shows in the sidebar as each upload is processed.
 
 Asking a question replaces the loading spinner with a small animated diagram (Question → Search +
 fuse → Generate answer → Answer) that advances in step with what's actually happening — the
@@ -89,6 +79,5 @@ up once the LLM call actually starts.
 
 - There is no test suite, linter, or build step configured in this repo.
 - Every retrieval logs each fused candidate's rank, RRF score, per-channel distance/score, and
-  pass/drop verdict to the console (CLI terminal or the Streamlit server's terminal) — useful for
-  debugging why a question returned no answer or which channel (embedding, BM25, or both)
-  surfaced a given chunk.
+  pass/drop verdict to the console (the Streamlit server's terminal) — useful for debugging why a
+  question returned no answer or which channel (embedding, BM25, or both) surfaced a given chunk.

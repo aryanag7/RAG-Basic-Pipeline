@@ -1,25 +1,25 @@
 import re
 
-from langchain_community.document_loaders import PyPDFLoader
+# from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.document_loaders.blob_loaders import Blob
 from langchain_community.document_loaders.parsers.pdf import PyPDFParser
 from langchain_core.documents import Document
 
-from config import PDF_PATH
-
-
-def load_pdf():
-    """Load the PDF into LangChain Document objects."""
-
-    if not PDF_PATH.exists():
-        raise FileNotFoundError(
-            f"PDF was not found at: {PDF_PATH.resolve()}"
-        )
-
-    loader = PyPDFLoader(str(PDF_PATH))
-    documents = loader.load()
-
-    return documents
+# Unused now that ingestion is upload-only. Kept for reference.
+# from config import PDF_PATH
+#
+# def load_pdf():
+#     """Load the PDF into LangChain Document objects."""
+#
+#     if not PDF_PATH.exists():
+#         raise FileNotFoundError(
+#             f"PDF was not found at: {PDF_PATH.resolve()}"
+#         )
+#
+#     loader = PyPDFLoader(str(PDF_PATH))
+#     documents = loader.load()
+#
+#     return documents
 
 
 def load_pdf_from_bytes(data: bytes, filename: str) -> list[Document]:

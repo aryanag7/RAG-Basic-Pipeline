@@ -44,13 +44,10 @@ def add_new_chunks(chunks: list[Document], vector_store: Chroma) -> int:
     return len(new_chunks)
 
 
-def create_or_load_vector_store(
-    chunks: list[Document],
-    embedding_model: HuggingFaceEmbeddings,
-) -> Chroma:
-    """Create Chroma and add only chunks not already stored."""
+def create_or_load_vector_store(embedding_model: HuggingFaceEmbeddings) -> Chroma:
+    """Open the persistent Chroma collection, creating it if it doesn't exist yet."""
 
-    vector_store = Chroma(
+    return Chroma(
         collection_name=COLLECTION_NAME,
         embedding_function=embedding_model,
         persist_directory=str(VECTOR_STORE_PATH),
@@ -61,16 +58,37 @@ def create_or_load_vector_store(
         },
     )
 
-    added = add_new_chunks(chunks, vector_store)
 
-    if added:
-        print(f"Added {added} chunks to Chroma.")
-    else:
-        print("All chunks are already stored in Chroma.")
+def list_indexed_documents(vector_store: Chroma) -> list[dict]:
+    """Group stored chunks by source, returning one summary row per document."""
 
-    print(
-        f"Total records in vector store: "
-        f"{len(vector_store.get()['ids'])}"
-    )
+    stored_data = vector_store.get(include=["metadatas"])
 
-    return vector_store
+    documents: dict[str, dict] = {}
+
+    for metadata in stored_data["metadatas"]:
+        source = metadata.get("source")
+        document = documents.setdefault(
+            source,
+            {
+                "source": source,
+                "filename": metadata.get("filename", source),
+                "size": metadata.get("file_size", 0),
+                "chunk_count": 0,
+            },
+        )
+        document["chunk_count"] += 1
+
+    return sorted(documents.values(), key=lambda document: document["filename"])
+
+
+def delete_source(source: str, vector_store: Chroma) -> int:
+    """Delete every chunk belonging to one document (matched by source). Returns count deleted."""
+
+    matches = vector_store.get(where={"source": source})
+    ids = matches["ids"]
+
+    if ids:
+        vector_store.delete(ids=ids)
+
+    return len(ids)
