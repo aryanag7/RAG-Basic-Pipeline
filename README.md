@@ -100,3 +100,6 @@ up once the LLM call actually starts.
 - Every retrieval logs each fused candidate's rank, RRF score, per-channel distance/score, and
   pass/drop verdict to the console (the Streamlit server's terminal) — useful for debugging why a
   question returned no answer or which channel (embedding, BM25, or both) surfaced a given chunk.
+- `requirements.txt` includes `deepeval`, used only by a local-only retrieval/generation evaluation
+  script that isn't part of this repo's git history (it lives under the gitignored
+  `extract_pdfs_rag/` folder) — not needed to run the app itself.

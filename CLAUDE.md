@@ -265,6 +265,43 @@ only cause one rerun, since the flag is checked once after the whole loop, not p
 
 Besides the app's own gitignored paths above, the repo also ignores two directories unrelated to
 the pipeline itself: `extract_pdfs_rag/` (a local RAG benchmark dataset/notebook — CSVs, zipped PDF
-corpora, an eval notebook — used for external evaluation work, not read by the app) and `.claude/`
-(machine-local Claude Code settings, e.g. permission grants tied to one developer's file paths, not
-project configuration).
+corpora, an eval notebook, and a local-only evaluation script, none of it read by the app — see the
+next section) and `.claude/` (machine-local Claude Code settings, e.g. permission grants tied to one
+developer's file paths, not project configuration).
+
+### RAG evaluation script (`extract_pdfs_rag/eval.py`, local-only)
+
+Not tracked in git — `extract_pdfs_rag/` is a blanket `.gitignore` entry, so this script (and
+everything it produces) is absent on a fresh checkout; the only trace of it in git history is the
+`deepeval` line in `requirements.txt`. It's a standalone script, run manually
+(`python extract_pdfs_rag/eval.py`), that measures retrieval and generation quality separately using
+[DeepEval](https://github.com/confident-ai/deepeval) — independent of, and without modifying, the
+app's own pipeline code.
+
+- **Dataset**: the 80 curated questions in
+  `text_only_rag_benchmark_4x4_unique/metadata/evaluation_queries.csv` (query, gold answer, source
+  `pdf_filename`, extractive/abstractive `type`), built by
+  `create_text_only_rag_benchmark_4x4_unique.ipynb` from 10 "relevant" arXiv PDFs + 5 "distractor"
+  PDFs already extracted under `text_only_rag_benchmark_4x4_unique/pdfs/`.
+- **Isolation**: indexes those 15 PDFs into `extract_pdfs_rag/eval_vector_store/` (a separate Chroma
+  collection, `eval_chunks`) — never the app's production `vector_store/` — rebuilt from scratch on
+  every run so the index always reflects `config.py`'s *current* chunking/embedding settings, which
+  is what makes it valid to compare runs after changing those constants.
+- **Pipeline reuse**: calls the same `loader`/`splitter`/`vector_store`/`retriever`/`generator`
+  functions the app uses (`load_pdf_from_bytes`, `clean_documents`, `split_documents`,
+  `add_new_chunks`, `retrieve_relevant_chunks`, `generate_answer`) — no pipeline code was changed to
+  support evaluation. Mirrors the app's "no LLM call on empty retrieval" rule per question.
+- **Metrics**: retrieval is scored with DeepEval's `ContextualPrecisionMetric`,
+  `ContextualRecallMetric`, and `ContextualRelevancyMetric`, plus a ground-truth `hit_rate` (does the
+  retrieved set include the query's actual source PDF, checked via chunk `metadata["filename"]`);
+  generation is scored with `AnswerRelevancyMetric` and `FaithfulnessMetric`. No `model=` override is
+  passed to any metric, so DeepEval's own default judge model is used, and whichever model that
+  resolves to is recorded in the output for reproducibility. Per-question retrieval/generation/total
+  latency is also measured (`time.perf_counter()` around the real `retrieve_relevant_chunks()` /
+  `generate_answer()` calls) and averaged into the summary.
+- **Outputs**: one summary row appended per run to `extract_pdfs_rag/eval_results.csv` (a config
+  snapshot — chunk size/overlap, embedding model, generation LLM, retrieval tunables — plus each
+  metric's mean/pass-rate and the latency means), so different `config.py` settings can be compared
+  across runs; and a per-question detail CSV per run under `extract_pdfs_rag/eval_runs/`.
+- CLI flags: `--label NAME` (tags the summary row for later comparison) and `--sample-size N`
+  (evaluate only the first N questions, for a cheap smoke test before committing to a full run).
