@@ -97,6 +97,47 @@ up once the LLM call actually starts.
 
 ![Answer generated from retrieved chunks](docs/screenshots/response.png)
 
+## Evaluation Results
+
+Measured with `extract_pdfs_rag/eval.py` against the 80-question benchmark
+(`extract_pdfs_rag/text_only_rag_benchmark_4x4_unique`), scored with DeepEval. Full numbers live in
+`extract_pdfs_rag/eval_results.csv`.
+
+| Metric                | Baseline (RRF only) | Reranker, `TOP_K=5` | Reranker, `TOP_K=7` (default) |
+| ---------------------- | -------------------- | -------------------- | ------------------------------ |
+| Hit rate                | 100%                 | 100%                 | 100%                           |
+| Contextual precision    | 82.7%                | 91.3%                | 86.1%                          |
+| Contextual recall       | 90.9%                | 93.8%                | 93.1%                          |
+| Contextual relevancy    | 50.1%                | 46.6%                | 46.7%                          |
+| Answer relevancy        | 92.9%                | 88.0%                | 92.4%                          |
+| Faithfulness            | 96.6%                | 93.2%                | 96.3%                          |
+
+*Baseline is the mean of two identical-config runs (`baseline-no-latency`, `baseline-with-latency`);
+reranker rows are single runs (`reranker-topk5`, `reranker-topk7`).*
+
+**Key findings**
+
+- **Reranking meaningfully improves retrieval precision.** Adding the cross-encoder lifts
+  contextual precision from 82.7% to 91.3% at `TOP_K=5` — an ~8.6-point jump, far larger than the
+  run-to-run noise below.
+- **But `TOP_K=5` was too narrow for synthesis-style questions.** Answer relevancy dropped from
+  92.9% to 88.0% at `TOP_K=5`. The reranker is very good at surfacing the single best-matching
+  chunk, but some benchmark questions are abstractive/synthesis questions that need more than one
+  supporting chunk — with only 5 slots, the reranker's sharper ranking was squeezing out
+  complementary context those questions needed.
+- **Widening to `TOP_K=7` fixes it while keeping most of the precision gain.** Answer relevancy
+  recovers to 92.4% (essentially back to baseline) and faithfulness to 96.3%, while contextual
+  precision (86.1%) stays well above the no-reranker baseline (82.7%).
+- **Run-to-run noise floor.** The two baseline runs used identical config, so their spread is pure
+  noise: faithfulness varied by ~3.4 points and contextual recall by ~1.9 points between them, while
+  contextual precision and answer relevancy were tight (<0.5 points). The precision and
+  answer-relevancy swings above are well outside that noise band, so they're real effects. Contextual
+  recall differences between configs (2-3 points) are close to that noise floor and shouldn't be
+  over-read; contextual relevancy's ~3.5-point dip is consistent across both reranker configs, so it
+  looks like a small real effect rather than noise, but it's minor next to the precision gain.
+
+**Reranker + `TOP_K=7` is the current default configuration** (`config.py`).
+
 ## Notes
 
 - There is no test suite, linter, or build step configured in this repo.
