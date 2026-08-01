@@ -104,6 +104,7 @@ up once the LLM call actually starts.
   pass/drop verdict to the console (the Streamlit server's terminal) — useful for debugging why a
   question returned no answer or which channel (embedding, BM25, or both) surfaced a given chunk.
   A second log block shows the final cross-encoder reranked order and each score.
-- `requirements.txt` includes `deepeval`, used only by a local-only retrieval/generation evaluation
-  script that isn't part of this repo's git history (it lives under the gitignored
-  `extract_pdfs_rag/` folder) — not needed to run the app itself.
+- `requirements.txt` includes `deepeval`, used only by the retrieval/generation evaluation script
+  under `extract_pdfs_rag/` (`eval.py`) — not needed to run the app itself. The script and its
+  benchmark metadata are tracked in git; the underlying PDF binaries and per-run outputs
+  (`eval_vector_store/`, `eval_runs/`) are gitignored.
