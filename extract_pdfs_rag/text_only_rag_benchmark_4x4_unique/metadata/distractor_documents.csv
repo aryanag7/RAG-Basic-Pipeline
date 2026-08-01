@@ -1,0 +1,6 @@
+doc_id,arxiv_id,pdf_filename,pdf_url,file_exists,file_size_kb,query_count,sample_query,document_type
+2404.05230v2,Distractor:2404.05230v2,2404.05230v2.pdf,N/A (Distractor),True,1229.7,0,N/A (Distractor),distractor
+2409.12067v4,Distractor:2409.12067v4,2409.12067v4.pdf,N/A (Distractor),True,3195.6,0,N/A (Distractor),distractor
+2409.04233v1,Distractor:2409.04233v1,2409.04233v1.pdf,N/A (Distractor),True,440.1,0,N/A (Distractor),distractor
+2412.20173v3,Distractor:2412.20173v3,2412.20173v3.pdf,N/A (Distractor),True,201.9,0,N/A (Distractor),distractor
+2411.10956v2,Distractor:2411.10956v2,2411.10956v2.pdf,N/A (Distractor),True,489.3,0,N/A (Distractor),distractor

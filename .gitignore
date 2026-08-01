@@ -5,5 +5,10 @@ __pycache__/
 vector_store/
 .DS_Store
 data/*.pdf
-extract_pdfs_rag/
+extract_pdfs_rag/text_only_rag_benchmark_4x4_unique/pdfs/
+extract_pdfs_rag/*.zip
+extract_pdfs_rag/eval_vector_store/
+extract_pdfs_rag/eval_runs/
+extract_pdfs_rag/All_PDFs.csv
+extract_pdfs_rag/Eval_data.csv
 .claude/
