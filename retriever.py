@@ -1,5 +1,6 @@
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from sentence_transformers import CrossEncoder
 
 from bm25_index import build_bm25_index, search_bm25
 from config import BM25_TOP_K, EMBED_CANDIDATE_K, MAX_DISTANCE, RRF_K, TOP_K
@@ -22,9 +23,29 @@ def _passes(result: FusedResult, max_distance: float) -> bool:
     return result.bm25_score is not None
 
 
+def _rerank(
+    query: str,
+    results: list[FusedResult],
+    reranker: CrossEncoder,
+) -> list[FusedResult]:
+    """Score gated candidates with a cross-encoder and sort best-first."""
+
+    if not results:
+        return results
+
+    pairs = [(query, result.document.page_content) for result in results]
+    scores = reranker.predict(pairs)
+
+    for result, score in zip(results, scores):
+        result.rerank_score = float(score)
+
+    return sorted(results, key=lambda result: result.rerank_score, reverse=True)
+
+
 def retrieve_relevant_chunks(
     query: str,
     vector_store: Chroma,
+    reranker: CrossEncoder,
     top_k: int = TOP_K,
     max_distance: float = MAX_DISTANCE,
     embed_candidate_k: int = EMBED_CANDIDATE_K,
@@ -34,8 +55,10 @@ def retrieve_relevant_chunks(
     """Retrieve relevant chunks via hybrid embedding + BM25 search.
 
     Runs both retrieval channels over widened candidate pools, fuses them
-    with Reciprocal Rank Fusion, filters weak matches, and returns the top
-    results. The returned float is the fused RRF score (not a distance).
+    with Reciprocal Rank Fusion, filters weak matches with `_passes()`, then
+    reranks the surviving pool with a cross-encoder before taking the final
+    `top_k`. The returned float is the cross-encoder rerank score (not a
+    distance or an RRF score).
     """
 
     embedding_hits = vector_store.similarity_search_with_score(
@@ -76,9 +99,22 @@ def retrieve_relevant_chunks(
 
     passing_results = [result for result in fused if _passes(result, max_distance)]
 
+    reranked = _rerank(query, passing_results, reranker)
+
+    print(f"\nReranked results for query: {query!r} (top_k={top_k})")
+    for rank, result in enumerate(reranked[:top_k], start=1):
+        page = result.document.metadata.get("page_label", "Unknown")
+        source = result.document.metadata.get("source", "Unknown")
+        preview = result.document.page_content[:80].replace("\n", " ")
+
+        print(
+            f"  #{rank} rerank_score={result.rerank_score:.4f} "
+            f"(rrf_score={result.rrf_score:.4f}) page={page} source={source} | {preview!r}"
+        )
+
     return [
-        (result.document, result.rrf_score)
-        for result in passing_results[:top_k]
+        (result.document, result.rerank_score)
+        for result in reranked[:top_k]
     ]
 
 
@@ -90,7 +126,7 @@ def display_retrieved_chunks(
     for rank, (document, score) in enumerate(results, start=1):
         print("\n" + "=" * 60)
         print(f"Result: {rank}")
-        print(f"Relevance score (RRF): {score:.4f}")
+        print(f"Relevance score (reranked): {score:.4f}")
         print(f"Page: {document.metadata.get('page_label')}")
         print(f"Source: {document.metadata.get('source')}")
         print("\nRetrieved text:")

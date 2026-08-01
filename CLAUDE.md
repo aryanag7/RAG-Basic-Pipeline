@@ -80,7 +80,8 @@ directly, both eagerly at startup (to open the vector store) and per-interaction
 5. **Retrieve** (`retriever.py`) — `retrieve_relevant_chunks()` is a hybrid search: an embedding
    channel (Chroma `similarity_search_with_score`, widened to `EMBED_CANDIDATE_K` candidates) and
    a keyword channel (BM25, widened to `BM25_TOP_K` candidates) are fused into one ranked list via
-   Reciprocal Rank Fusion (`fusion.py`, constant `RRF_K`), then filtered and truncated to `TOP_K`.
+   Reciprocal Rank Fusion (`fusion.py`, constant `RRF_K`), then filtered, reranked with a
+   cross-encoder, and truncated to `TOP_K`.
    - `bm25_index.py`'s `build_bm25_index()` rebuilds a `rank_bm25.BM25Okapi` index **from scratch
      on every call**, reading whatever's currently in the vector store via `vector_store.get()` —
      it is not cached. This is deliberate: the Streamlit uploader (see below) adds chunks to the
@@ -113,21 +114,36 @@ directly, both eagerly at startup (to open the vector store) and per-interaction
      case without weakening anything else.
    - If nothing survives gating, the OpenAI API is never called — the UI shows a no-match message
      instead of guessing.
+   - Reranking (`retriever.py`'s `_rerank()`, model in `reranker.py`): the pool that survives
+     gating is scored by a local `sentence-transformers` cross-encoder
+     (`RERANKER_MODEL_NAME`, `cross-encoder/ms-marco-MiniLM-L-6-v2`), which jointly encodes each
+     `(query, chunk text)` pair rather than comparing independently-computed vectors — normally a
+     stronger relevance signal than RRF rank, which only reflects each channel's own ordering. The
+     gated pool (not just the top `TOP_K`) is reranked so a chunk that barely survived gating but is
+     actually the best semantic match can still rise to the top; only after reranking is the list
+     truncated to `TOP_K`. The float returned alongside each `Document` from
+     `retrieve_relevant_chunks()` is this cross-encoder score, not the RRF score or an embedding
+     distance. Like `create_embedding_model()`/`create_llm()`, `create_reranker()` is wrapped in its
+     own `st.cache_resource`-decorated `load_reranker()` in `streamlit_app.py`, loaded lazily on
+     the first "Ask" click (not eagerly at module load) and reused across all subsequent queries in
+     the process.
    - Every call unconditionally prints each fused candidate's rank, RRF score, per-channel
      distance/score and rank (when present), PASS/DROP verdict, page, source, and a content
      preview to the console — this is permanent, always-on debug logging (not gated behind a
      flag), the main way to diagnose why a query got zero/weak matches or which channel(s)
-     contributed a given hit.
+     contributed a given hit. A second, separate debug block prints the post-rerank order and each
+     surviving chunk's `rerank_score`, so it's possible to see exactly how reranking changed the
+     order RRF/gating produced.
 6. **Generate** (`generator.py`) — `create_llm()` / `generate_answer()` sends the filtered chunks
    plus the question to `ChatOpenAI` (`OPENAI_MODEL_NAME`). The system prompt constrains the
    model to answer only from the provided context and to say so explicitly when the context is
    insufficient.
 
-All tunables live as constants in `config.py`: `EMBEDDING_MODEL_NAME`, `VECTOR_STORE_PATH`,
-`COLLECTION_NAME`, `TOP_K`, `MAX_DISTANCE`, `EMBED_CANDIDATE_K`, `BM25_TOP_K`, `RRF_K`,
-`OPENAI_MODEL_NAME`, `CHUNK_SIZE`, `CHUNK_OVERLAP` (`PDF_PATH` is commented out, unused — see the
-Load stage above). `EMBED_CANDIDATE_K` and `BM25_TOP_K` (both `20`, 4x `TOP_K`) widen each
-channel's candidate pool before fusion, so RRF has enough material to re-rank across channels;
+All tunables live as constants in `config.py`: `EMBEDDING_MODEL_NAME`, `RERANKER_MODEL_NAME`,
+`VECTOR_STORE_PATH`, `COLLECTION_NAME`, `TOP_K`, `MAX_DISTANCE`, `EMBED_CANDIDATE_K`, `BM25_TOP_K`,
+`RRF_K`, `OPENAI_MODEL_NAME`, `CHUNK_SIZE`, `CHUNK_OVERLAP` (`PDF_PATH` is commented out, unused — see the
+Load stage above). `EMBED_CANDIDATE_K` and `BM25_TOP_K` (both `20`) widen each channel's candidate
+pool before fusion, so RRF and the reranker have enough material to work with beyond just `TOP_K`;
 `RRF_K` (`60`) is the standard Reciprocal Rank Fusion constant from Cormack/Clarke/Buettcher 2009.
 `config.py` also calls `load_dotenv()`, so it must be imported before anything that reads env
 vars — every other module already imports from it, which preserves that ordering.

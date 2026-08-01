@@ -14,6 +14,7 @@ class FusedResult:
     bm25_score: float | None
     embedding_rank: int | None
     bm25_rank: int | None
+    rerank_score: float | None = None
 
 
 def reciprocal_rank_fusion(

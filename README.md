@@ -15,7 +15,8 @@ from the content of the document(s), with page references.
   (BM25), combined with Reciprocal Rank Fusion (RRF)
 - Filters weak matches — a chunk survives if either channel independently qualifies it (embedding
   distance under the threshold, or a positive BM25 keyword-overlap score)
-- Keeps the top five fused results
+- Reranks the surviving candidates with a local cross-encoder, then keeps the top-ranked results
+  (`TOP_K` in `config.py`)
 - Generates grounded answers using an OpenAI model
 
 If no chunk clears that bar, the OpenAI API is never called — the app says it couldn't find
@@ -32,7 +33,9 @@ The pipeline is split into single-responsibility modules, each mirroring one sta
 - `vector_store.py` — Chroma storage, dedup, per-document listing, and deletion
 - `bm25_index.py` — BM25 keyword index, rebuilt from the live vector store on every query
 - `fusion.py` — Reciprocal Rank Fusion of the embedding and BM25 result lists
-- `retriever.py` — runs both retrieval channels, fuses them, and applies threshold filtering
+- `retriever.py` — runs both retrieval channels, fuses them, applies threshold filtering, and
+  reranks the survivors with a cross-encoder
+- `reranker.py` — local cross-encoder reranking model
 - `generator.py` — prompt building and OpenAI answer generation
 - `streamlit_app.py` — the Streamlit web UI, calling the pipeline modules directly
 - `ui_theme.py` — warm editorial theme CSS and the loading-state pipeline animation
@@ -54,7 +57,7 @@ streamlit run streamlit_app.py
 ```
 
 Opens a browser page titled "SourceLens" with a query box and an "Ask" button. The embedding
-model, vector store, and LLM are loaded once per process and reused across questions.
+model, vector store, reranker, and LLM are loaded once per process and reused across questions.
 
 The knowledge base starts empty — there's no bundled document. Upload a PDF from the sidebar to
 get started; the "Ask" button and the query box stay disabled (with a prompt to upload a PDF)
@@ -100,6 +103,7 @@ up once the LLM call actually starts.
 - Every retrieval logs each fused candidate's rank, RRF score, per-channel distance/score, and
   pass/drop verdict to the console (the Streamlit server's terminal) — useful for debugging why a
   question returned no answer or which channel (embedding, BM25, or both) surfaced a given chunk.
+  A second log block shows the final cross-encoder reranked order and each score.
 - `requirements.txt` includes `deepeval`, used only by a local-only retrieval/generation evaluation
   script that isn't part of this repo's git history (it lives under the gitignored
   `extract_pdfs_rag/` folder) — not needed to run the app itself.

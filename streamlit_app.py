@@ -5,11 +5,13 @@ from hashlib import sha256
 import streamlit as st
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
+from sentence_transformers import CrossEncoder
 
 import ui_theme
 from embedder import create_embedding_model
 from generator import create_llm, generate_answer
 from loader import clean_documents, load_pdf_from_bytes
+from reranker import create_reranker
 from retriever import retrieve_relevant_chunks
 from splitter import split_documents
 from vector_store import (
@@ -41,6 +43,13 @@ def load_llm() -> ChatOpenAI:
     """Create the OpenAI model once per app process."""
 
     return create_llm()
+
+
+@st.cache_resource(show_spinner=False)
+def load_reranker() -> CrossEncoder:
+    """Create the cross-encoder reranker once per app process."""
+
+    return create_reranker()
 
 
 st.set_page_config(page_title="SourceLens")
@@ -170,7 +179,8 @@ if ask_clicked:
         pipeline_slot = st.empty()
 
         pipeline_slot.html(ui_theme.render_pipeline_frame("retrieve"))
-        results = retrieve_relevant_chunks(query=query, vector_store=vector_store)
+        reranker = load_reranker()
+        results = retrieve_relevant_chunks(query=query, vector_store=vector_store, reranker=reranker)
 
         if results:
             pipeline_slot.html(ui_theme.render_pipeline_frame("generate"))
